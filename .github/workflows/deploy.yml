@@ -1,0 +1,39 @@
+name: Deploy to Apps Site
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build project
+        working-directory: frontend
+        env:
+          VITE_APP_BASE_PATH: ${{ vars.VITE_APP_BASE_PATH }}
+          # VITE_BACKEND_URL: ${{ vars.VITE_BACKEND_URL }}
+        run: |
+          npm run build
+          touch dist/.nojekyll
+
+      - name: Deploy to apps site
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.APPS_SITE_TOKEN }}
+          external_repository: ${{ secrets.APPS_SITE_REPO }}
+          publish_branch: master
+          publish_dir: ./frontend/dist
+          destination_dir: apps/chords-atlas
+          keep_files: false
