@@ -83,6 +83,7 @@ function proxyPlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: process.env.VITE_APP_BASE_PATH || '/',
   plugins: [
     react({
       babel: {
@@ -91,4 +92,8 @@ export default defineConfig({
     }),
     proxyPlugin(),
   ],
+  server: {
+    host: true,
+    port: 3000,
+  },
 })
