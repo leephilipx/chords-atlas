@@ -10,6 +10,33 @@
   var AUTO_SCROLL_SPEED = 1
   var AUTO_SCROLL_PAUSED = false
   var SCAN_DONE = false
+  var SCAN_DISABLED = false
+
+  // --- resource URL patching ------------------------------------------------
+
+  function resolveResourceUrl(url) {
+    if (!url || typeof url !== 'string') return url
+    if (url.indexOf('http://') === 0 || url.indexOf('https://') === 0 || url.indexOf('//') === 0) return url
+    try { return new URL(url, ORIGIN_HREF).href }
+    catch (_) { return url }
+  }
+
+  if (ORIGIN_HREF && ORIGIN_HREF !== location.href) {
+    var _origFetch = window.fetch
+    window.fetch = function (url, opts) {
+      return _origFetch.call(this, resolveResourceUrl(url), opts)
+    }
+
+    var _origXHROpen = XMLHttpRequest.prototype.open
+    XMLHttpRequest.prototype.open = function (method, url) {
+      var args = [].slice.call(arguments)
+      args[1] = resolveResourceUrl(args[1])
+      return _origXHROpen.apply(this, args)
+    }
+  }
+
+  window.__chordsSectionRegex =
+    /^(Verse\s*\d*|Chorus\s*\d*|Bridge\s*\d*|Intro|Outro|Interlude|Refrain|Rap|Instrumental|Ending|Pre[\s-]?Chorus\s*\d*|Post[\s-]?Chorus\s*\d*)$/i
 
   // --- message handling ---------------------------------------------------
 
@@ -49,8 +76,16 @@
       AUTO_SCROLL_PAUSED = false
     } else if (msg.type === 'setZoom') {
       document.body.style.zoom = String(msg.level)
+    } else if (msg.type === 'disable') {
+      SCAN_DISABLED = true
+    } else if (msg.type === 'enable') {
+      SCAN_DISABLED = false
+      SCAN_DONE = false
+      scanSections()
     } else if (msg.type === 'rescan') {
-      if (!SCAN_DONE) scanSections()
+      if (SCAN_DISABLED) return
+      SCAN_DONE = false
+      scanSections()
     }
   })
 
@@ -72,74 +107,17 @@
     }
   }
 
-  // --- link interception ------------------------------------------------
-
-  document.addEventListener('click', function (e) {
-    var link = e.target.closest('a')
-    if (!link || !link.href) return
-    var href = link.getAttribute('href') || ''
-    if (!href || href === '#' || href.startsWith('javascript:')) return
-    if (link.target && link.target !== '_self') return
-
-    try {
-      var current = new URL(location.href)
-      var target = new URL(link.href)
-      // Don't intercept same-page anchor links
-      if (target.hostname === current.hostname &&
-          target.pathname === current.pathname &&
-          target.search === current.search) return
-    } catch (_) { /* ignore malformed URLs */ }
-
-    e.preventDefault()
-    e.stopPropagation()
-    window.parent.postMessage({ type: 'chords-navigate', url: link.href }, '*')
-  }, true)
-
   // --- boot ---------------------------------------------------------------
 
   var started = false
   function boot() {
     if (started) return
     started = true
+    if (typeof window.__chordsFindSections !== 'function') return
     window.parent.postMessage(
       { type: 'chords-ready', hostname: ORIGIN_HOSTNAME, href: ORIGIN_HREF },
       '*'
     )
-
-    // No domain finder registered — nothing to scan, stop immediately
-    if (typeof window.__chordsFindSections !== 'function') return
-
-    function startScanLoop() {
-      var tries = 0
-      function tryScan() {
-        if (SCAN_DONE) return
-        tries++
-        scanSections()
-        if (!SCAN_DONE && tries < 6) {
-          setTimeout(tryScan, 300)
-        }
-      }
-      setTimeout(tryScan, 0)
-    }
-
-    // If the domain provides a content gate, wait for it first
-    if (typeof window.__chordsHasContent === 'function') {
-      var contentTries = 0
-      function waitForContent() {
-        if (SCAN_DONE) return
-        contentTries++
-        if (window.__chordsHasContent()) {
-          startScanLoop()
-          return
-        }
-        if (contentTries < 4) {
-          setTimeout(waitForContent, 300)
-        }
-      }
-      setTimeout(waitForContent, 500)
-    } else {
-      startScanLoop()
-    }
   }
 
   if (document.readyState === 'complete') {

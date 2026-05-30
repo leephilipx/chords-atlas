@@ -1,8 +1,17 @@
-; (function () {
+;(function () {
   'use strict'
 
-  var SECTION_RGX =
-    /^(Verse\s*\d*|Chorus\s*\d*|Bridge\s*\d*|Prechorus\s*\d*|Postchorus\s*\d*|Intro|Outro|Tag|Interlude|Refrain|Rap|Instrumental|Ending)$/i
+  var R = window.__chordsSectionRegex
+
+  // --- prevent # navigation from transpose key clicks (GA stripped server-side)
+
+  document.addEventListener('click', function (e) {
+    var link = e.target.closest('a[href="#"]')
+    if (!link) return
+    var text = (link.textContent || '').trim()
+    if (!/^[A-G][#b]?(m)?$/.test(text)) return
+    e.preventDefault()
+  }, true)
 
   // --- utilities (pnwchords uses a scrollable container, not window) ------
 
@@ -49,7 +58,7 @@
     candidates.forEach(function (el) {
       if (!isVisible(el)) return
       var text = (el.textContent || '').trim()
-      if (SECTION_RGX.test(text)) {
+      if (R.test(text)) {
         var y = getAbsoluteY(el)
         results[text] = Math.round(y)
       }
@@ -64,7 +73,7 @@
         var lines = text.split('\n')
         lines.forEach(function (line) {
           var trimmed = line.trim()
-          if (SECTION_RGX.test(trimmed)) {
+          if (R.test(trimmed)) {
             var walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT, null)
             var node
             while ((node = walker.nextNode())) {

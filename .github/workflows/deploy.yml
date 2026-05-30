@@ -23,7 +23,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_APP_BASE_PATH: ${{ vars.VITE_APP_BASE_PATH }}
-          # VITE_BACKEND_URL: ${{ vars.VITE_BACKEND_URL }}
+          VITE_BACKEND_URL: ${{ vars.VITE_BACKEND_URL }}
         run: |
           npm run build
           touch dist/.nojekyll

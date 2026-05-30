@@ -25,6 +25,6 @@ dist-ssr
 *.sln
 *.sw?
 
-data
-storage/minio
 .env
+
+frontend/test-results

@@ -7,28 +7,32 @@ import {
   ZoomOutOutlined,
   SearchOutlined,
   ReloadOutlined,
-  ScanOutlined,
 } from '@ant-design/icons'
+import { BACKEND_URL } from '../utils/constants'
 
 type SectionPositions = Record<string, number>
 
-const KNOWN_CHORD_DOMAINS = ['worshiptogether.com', 'pnwchords.com']
+const CHORD_PATH_PATTERNS = [
+  'pnwchords.com',
+  'worshiptogether.com/songs/',
+  'tabs.ultimate-guitar.com/tab/',
+]
 
-function speedFormatter(v: number) {
-  return `${v.toFixed(1)}x`
+function canUseScan(url: string): boolean {
+  try {
+    const s = url.toLowerCase()
+    return CHORD_PATH_PATTERNS.some((p) => s.includes(p))
+  } catch {
+    return false
+  }
 }
 
 function formatSectionName(name: string) {
   return name.replace(/([a-z])(\d)/i, '$1 $2')
 }
 
-function isChordSite(url: string): boolean {
-  try {
-    const host = new URL(url).hostname
-    return KNOWN_CHORD_DOMAINS.some((d) => host.includes(d))
-  } catch {
-    return false
-  }
+function speedFormatter(v: number) {
+  return `${v.toFixed(1)}x`
 }
 
 function getGoogleSearchUrl(query: string): string {
@@ -38,8 +42,8 @@ function getGoogleSearchUrl(query: string): string {
 export default function ChordBrowser() {
   const [url, setUrl] = useState('')
   const [proxyUrl, setProxyUrl] = useState(() => {
-    const defaultUrl = 'https://www.google.com/webhp?igu=1'
-    return `/__proxy?url=${encodeURIComponent(defaultUrl)}`
+    const googleUrl = 'https://www.google.com/webhp?igu=1'
+    return `${BACKEND_URL}/__proxy?url=${encodeURIComponent(googleUrl)}&scan=0&_t=${Date.now()}`
   })
   const [sections, setSections] = useState<SectionPositions>({})
   const [activeSection, setActiveSection] = useState<string | null>(null)
@@ -47,15 +51,17 @@ export default function ChordBrowser() {
   const [scrollSpeed, setScrollSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [loading, setLoading] = useState(false)
-  const [currentHost, setCurrentHost] = useState('')
   const [iframeReady, setIframeReady] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640)
   const [scanEnabled, setScanEnabled] = useState(true)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const sectionsRef = useRef<SectionPositions>({})
+  const targetUrlRef = useRef('https://www.google.com/webhp?igu=1')
+  const scanEnabledRef = useRef(true)
   const { message } = App.useApp()
 
   sectionsRef.current = sections
+  scanEnabledRef.current = scanEnabled
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 640)
@@ -71,15 +77,21 @@ export default function ChordBrowser() {
   }, [])
 
   const navigateTo = useCallback((targetUrl: string) => {
+    let resolvedUrl = targetUrl
+    try {
+      resolvedUrl = new URL(targetUrl, targetUrlRef.current).href
+    } catch {
+      resolvedUrl = targetUrl
+    }
+    targetUrlRef.current = resolvedUrl
     setSections({})
     setActiveSection(null)
     setAutoScroll(false)
     setIframeReady(false)
-    setUrl(targetUrl)
-    const isChord = isChordSite(targetUrl)
-    setLoading(isChord)
-    setCurrentHost(isChord ? new URL(targetUrl).hostname : '')
-    const proxied = `/__proxy?url=${encodeURIComponent(targetUrl)}&_t=${Date.now()}`
+    setUrl(resolvedUrl)
+    const doScan = canUseScan(resolvedUrl) && scanEnabledRef.current
+    setLoading(doScan)
+    const proxied = `${BACKEND_URL}/__proxy?url=${encodeURIComponent(resolvedUrl)}&scan=${doScan ? '1' : '0'}&_t=${Date.now()}`
     setProxyUrl(proxied)
   }, [])
 
@@ -110,7 +122,6 @@ export default function ChordBrowser() {
       if (!e.data) return
       if (e.data.type === 'chords-ready') {
         setIframeReady(true)
-        setCurrentHost(e.data.hostname || '')
         return
       }
       if (e.data.type === 'chords-sections') {
@@ -136,10 +147,7 @@ export default function ChordBrowser() {
 
   useEffect(() => {
     if (!iframeReady) return
-    if (!scanEnabled) {
-      setLoading(false)
-      return
-    }
+    postToIframe({ type: 'enable' })
     let count = 0
     const interval = setInterval(() => {
       count++
@@ -159,7 +167,20 @@ export default function ChordBrowser() {
     return () => {
       clearInterval(interval)
     }
-  }, [iframeReady, scanEnabled, postToIframe, message])
+  }, [iframeReady, postToIframe, message])
+
+  useEffect(() => {
+    if (targetUrlRef.current === 'https://www.google.com/webhp?igu=1') return
+    const targetUrl = targetUrlRef.current
+    const doScan = canUseScan(targetUrl) && scanEnabled
+    setSections({})
+    setActiveSection(null)
+    setAutoScroll(false)
+    setIframeReady(false)
+    setLoading(doScan)
+    const proxied = `${BACKEND_URL}/__proxy?url=${encodeURIComponent(targetUrl)}&scan=${doScan ? '1' : '0'}&_t=${Date.now()}`
+    setProxyUrl(proxied)
+  }, [scanEnabled])
 
   const handleSectionClick = useCallback(
     (name: string, y: number) => {
@@ -201,34 +222,31 @@ export default function ChordBrowser() {
     })
   }, [postToIframe])
 
+  const handleIframeLoad = useCallback(() => {
+    try {
+      const href = iframeRef.current?.contentWindow?.location?.href
+      if (!href || href.startsWith(BACKEND_URL) || href === targetUrlRef.current) return
+      const prev = targetUrlRef.current
+      targetUrlRef.current = href
+      setUrl(href)
+      if (canUseScan(prev) && scanEnabledRef.current) {
+        navigateTo(prev)
+        return
+      }
+      navigateTo(href)
+    } catch (_) {}
+  }, [navigateTo])
+
   const handleRefresh = useCallback(() => {
     setSections({})
     setActiveSection(null)
     setIframeReady(false)
-    if (iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.location.reload()
-    }
-    if (currentHost && isChordSite(`https://${currentHost}`)) {
-      setLoading(true)
-    }
-  }, [currentHost])
-
-  const handleForceScan = useCallback(() => {
-    setSections({})
-    setActiveSection(null)
-    setLoading(true)
-    postToIframe({ type: 'rescan' })
-    let tries = 0
-    const interval = setInterval(() => {
-      tries++
-      if (Object.keys(sectionsRef.current).length > 0 || tries >= 6) {
-        clearInterval(interval)
-        setLoading(false)
-      } else {
-        postToIframe({ type: 'rescan' })
-      }
-    }, 500)
-  }, [postToIframe])
+    const targetUrl = targetUrlRef.current
+    const doScan = canUseScan(targetUrl) && scanEnabledRef.current
+    setLoading(doScan)
+    const proxied = `${BACKEND_URL}/__proxy?url=${encodeURIComponent(targetUrl)}&scan=${doScan ? '1' : '0'}&_t=${Date.now()}`
+    setProxyUrl(proxied)
+  }, [])
 
   const hasSections = Object.keys(sections).length > 0
 
@@ -326,9 +344,6 @@ export default function ChordBrowser() {
             <Tooltip title={scanEnabled ? 'Disable auto-scan' : 'Enable auto-scan'}>
               <Switch size="small" checked={scanEnabled} onChange={setScanEnabled} />
             </Tooltip>
-            <Tooltip title={loading ? 'Scanning...' : 'Force scan'}>
-              <Button size="small" icon={<ScanOutlined />} onClick={handleForceScan} loading={loading} />
-            </Tooltip>
           </div>
           {controls}
           {sectionRow}
@@ -362,9 +377,6 @@ export default function ChordBrowser() {
               <div style={{ width: 1, height: 24, background: '#ffffff33', flexShrink: 0 }} />
               <Tooltip title={scanEnabled ? 'Disable auto-scan' : 'Enable auto-scan'}>
                 <Switch size="small" checked={scanEnabled} onChange={setScanEnabled} />
-              </Tooltip>
-              <Tooltip title={loading ? 'Scanning...' : 'Force scan'}>
-                <Button size="small" icon={<ScanOutlined />} onClick={handleForceScan} loading={loading} />
               </Tooltip>
             </div>
             {hasSections && <div style={{ width: 1, height: 24, background: '#ffffff33', flexShrink: 0 }} />}
@@ -402,8 +414,9 @@ export default function ChordBrowser() {
             opacity: loading ? 0.4 : 1,
             transition: 'opacity 0.3s',
           }}
+          onLoad={handleIframeLoad}
           title="chords-viewer"
-          sandbox="allow-scripts allow-forms allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
         />
       </div>
     </div>

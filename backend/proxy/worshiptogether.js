@@ -1,8 +1,7 @@
 ; (function () {
   'use strict'
 
-  var SECTION_RGX =
-    /^(Verse\s*\d*|Chorus\s*\d*|Bridge\s*\d*|Prechorus\s*\d*|Postchorus\s*\d*|Intro|Outro|Tag|Interlude|Refrain|Rap|Instrumental|Ending)$/i
+  var R = window.__chordsSectionRegex
 
   // --- utilities (worshipTogether uses simple window scrolling) ------------
 
@@ -29,7 +28,7 @@
       var noteText = (noteEl && noteEl.textContent || '').trim()
       if (noteText !== '' && noteText !== '\u00A0') return
       var name = (lyricEl.textContent || '').trim()
-      if (SECTION_RGX.test(name)) {
+      if (R.test(name)) {
         var y = getAbsoluteY(line)
         results[name] = Math.round(y)
       }
