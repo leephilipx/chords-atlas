@@ -16,6 +16,9 @@ with open(BASE_DIR / "proxy" / "bridge.js") as f:
 with open(BASE_DIR / "proxy" / "intercept.js") as f:
     INTERCEPT_SCRIPT = f.read()
 
+with open(BASE_DIR / "proxy" / "ug-url-fix.js") as f:
+    UG_URL_FIX = f.read()
+
 _DOMAIN_PATTERNS = [
     ("pnwchords.com", "pnwchords.js"),
     ("worshiptogether.com/songs/", "worshiptogether.js"),
@@ -106,25 +109,40 @@ async def proxy(
             if domain_script
             else ""
         )
+        is_ug = "tabs.ultimate-guitar.com" in target_hostname
         base_tag = f'<base href="{target_origin}/">'
+        if is_ug:
+            base_tag = base_tag + f"<script data-chords-url-fix>{UG_URL_FIX}</script>"
         intercept_tag = (
             f"<script data-chords-intercept>{INTERCEPT_SCRIPT}</script>"
         )
 
+        script_block = f"{origin_script}{intercept_tag}" + (
+            f"{shared_tag}{domain_tag}" if scan == "1" and is_chord else ""
+        )
+
         html = html.replace("<head>", f"<head>{base_tag}")
-        if scan == "1" and is_chord:
-            html = html.replace(
-                "</head>", f"{origin_script}{intercept_tag}{shared_tag}{domain_tag}</head>"
-            )
-        else:
-            html = html.replace(
-                "</head>", f"{origin_script}{intercept_tag}</head>"
-            )
+        html = html.replace(
+            "</head>", f"{script_block}</head>"
+        )
 
         if "pnwchords.com" in target_hostname:
             html = re.sub(
                 r'<script[^>]*(?:google.*(?:analytics|tagmanager|gtag)|id=["\'](?:google_gtagjs|google-analytics))[^>]*>[\s\S]*?</script>',
                 '',
+                html,
+                flags=re.IGNORECASE,
+            )
+
+        if "tabs.ultimate-guitar.com" in target_hostname:
+            def _rewrite_ug_url(m):
+                attr = m.group(1)
+                quote = m.group(2)
+                path = m.group(3)
+                return f'{attr}={quote}{target_origin}{path}{quote}'
+            html = re.sub(
+                r'(src|href)=(["\'])(/(?!/)[^"\']*)\2',
+                _rewrite_ug_url,
                 html,
                 flags=re.IGNORECASE,
             )
