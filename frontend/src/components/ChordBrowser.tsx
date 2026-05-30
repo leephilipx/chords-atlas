@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Input, Button, Slider, Switch, Tooltip, App, Spin } from 'antd'
+import { Input, Button, Slider, Switch, Tooltip, App, Spin, Dropdown } from 'antd'
 import {
   PlayCircleOutlined,
   PauseCircleOutlined,
@@ -7,6 +7,9 @@ import {
   ZoomOutOutlined,
   SearchOutlined,
   ReloadOutlined,
+  LeftOutlined,
+  RightOutlined,
+  CaretDownOutlined,
 } from '@ant-design/icons'
 import { BACKEND_URL } from '../utils/constants'
 
@@ -39,6 +42,15 @@ function getGoogleSearchUrl(query: string): string {
   return `https://www.google.com/search?igu=1&q=${encodeURIComponent(query)}`
 }
 
+function displayUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.hostname + u.pathname
+  } catch {
+    return url
+  }
+}
+
 export default function ChordBrowser() {
   const [url, setUrl] = useState('')
   const [proxyUrl, setProxyUrl] = useState(() => {
@@ -58,6 +70,9 @@ export default function ChordBrowser() {
   const sectionsRef = useRef<SectionPositions>({})
   const targetUrlRef = useRef('https://www.google.com/webhp?igu=1')
   const scanEnabledRef = useRef(true)
+  const historyRef = useRef<string[]>(['https://www.google.com/webhp?igu=1'])
+  const historyIdxRef = useRef(0)
+  const skipPushRef = useRef(false)
   const { message } = App.useApp()
 
   sectionsRef.current = sections
@@ -83,6 +98,12 @@ export default function ChordBrowser() {
     } catch {
       resolvedUrl = targetUrl
     }
+    if (!skipPushRef.current) {
+      historyRef.current = historyRef.current.slice(0, historyIdxRef.current + 1)
+      historyRef.current.push(resolvedUrl)
+      historyIdxRef.current = historyRef.current.length - 1
+    }
+    skipPushRef.current = false
     targetUrlRef.current = resolvedUrl
     setSections({})
     setActiveSection(null)
@@ -248,6 +269,30 @@ export default function ChordBrowser() {
     setProxyUrl(proxied)
   }, [])
 
+  const goBack = useCallback(() => {
+    if (historyIdxRef.current > 0) {
+      historyIdxRef.current--
+      skipPushRef.current = true
+      navigateTo(historyRef.current[historyIdxRef.current])
+    }
+  }, [navigateTo])
+
+  const goForward = useCallback(() => {
+    if (historyIdxRef.current < historyRef.current.length - 1) {
+      historyIdxRef.current++
+      skipPushRef.current = true
+      navigateTo(historyRef.current[historyIdxRef.current])
+    }
+  }, [navigateTo])
+
+  const jumpToHistory = useCallback((targetUrl: string) => {
+    const idx = historyRef.current.indexOf(targetUrl)
+    if (idx < 0) return
+    historyIdxRef.current = idx
+    skipPushRef.current = true
+    navigateTo(targetUrl)
+  }, [navigateTo])
+
   const hasSections = Object.keys(sections).length > 0
 
   const controls = hasSections ? (
@@ -323,11 +368,61 @@ export default function ChordBrowser() {
     </div>
   ) : null
 
+  const backHistory = historyRef.current.slice(0, historyIdxRef.current).reverse()
+  const forwardHistory = historyRef.current.slice(historyIdxRef.current + 1)
+
+  function makeHistoryItems(urls: string[]) {
+    return urls.map((u) => ({ key: u, label: <span style={{ fontSize: 12 }}>{displayUrl(u)}</span> }))
+  }
+
+  const backDisabled = historyIdxRef.current === 0
+  const forwardDisabled = historyIdxRef.current >= historyRef.current.length - 1
+
+  function navButton(
+    icon: React.ReactNode,
+    onClick: () => void,
+    disabled: boolean,
+    historyUrls: string[],
+    isFirst: boolean,
+  ) {
+    const btn = (
+      <Button size="small" icon={icon} onClick={onClick} disabled={disabled}
+        style={{ minWidth: 28, padding: '0 4px',
+          ...(isFirst
+            ? { borderTopRightRadius: 0, borderBottomRightRadius: 0 }
+            : { borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 0 }),
+        }} />
+    )
+    if (historyUrls.length === 0) return btn
+    return (
+      <div style={{ display: 'flex', gap: 0, flexShrink: 0 }}>
+        {btn}
+        <Dropdown menu={{ items: makeHistoryItems(historyUrls), onClick: ({ key }) => jumpToHistory(key) }} trigger={['click']}>
+          <Button size="small" disabled={disabled}
+            style={{ minWidth: 12, padding: '0 2px',
+              ...(isFirst
+                ? { borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 0 }
+                : { borderTopRightRadius: 0, borderBottomRightRadius: 0 }),
+            }}>
+            <CaretDownOutlined style={{ fontSize: 10 }} />
+          </Button>
+        </Dropdown>
+      </div>
+    )
+  }
+
+  const backBtn = navButton(<LeftOutlined />, goBack, backDisabled, backHistory, true)
+  const forwardBtn = navButton(<RightOutlined />, goForward, forwardDisabled, forwardHistory, false)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {isMobile ? (
         <>
           <div style={{ display: 'flex', alignItems: 'center', padding: '6px 10px', background: '#001529', gap: 6, zIndex: 10 }}>
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              {backBtn}
+              {forwardBtn}
+            </div>
             <Input
               placeholder="Search Google or enter chord URL ..."
               value={url}
@@ -361,7 +456,11 @@ export default function ChordBrowser() {
             }}
           >
             <div style={{ display: 'flex', gap: 8, flex: 1, minWidth: 0, alignItems: 'center' }}>
-              <Input
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              {backBtn}
+              {forwardBtn}
+            </div>
+            <Input
                 placeholder="Search Google or enter chord URL ..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
